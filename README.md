@@ -93,6 +93,7 @@ Check directory permissions for /var/log/iperf_tests/.
 MIT License — You’re free to modify, distribute, and use it.
 
 📁 .gitignore
+```
 *.log
 *.pyc
 __pycache__/
@@ -100,3 +101,4 @@ __pycache__/
 /tmp/iperf3_udp_*.log
 /tmp/iperf3_tcp_*.log
 /var/log/iperf_tests/*.log
+```
