@@ -20,18 +20,11 @@ It uses **client-server architecture**:
 ---
 
 ## 🧱 Setup Architecture
-pgsql
-Copy
-Edit
   +-------------+              +---------------+
   |   Client    | <=====>     |    Server     |
   | (runs this  |   test via  | (runs iperf3   |
   |  script)    |   iperf3    |   in server)   |
   +-------------+              +---------------+
-yaml
-Copy
-Edit
-
 ---
 
 ## ⚙️ Setup Instructions
