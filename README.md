@@ -20,11 +20,11 @@ It uses **client-server architecture**:
 ---
 
 ## 🧱 Setup Architecture
-  +-------------+              +---------------+
-  |   Client    | <=====>     |    Server     |
-  | (runs this  |   test via  | (runs iperf3   |
-  |  script)    |   iperf3    |   in server)   |
-  +-------------+              +---------------+
+      +-------------+              +---------------+
+      |   Client    | <=====>     |    Server     |
+      | (runs this  |   test via  | (runs iperf3   |
+      |  script)    |   iperf3    |   in server    |
+      +-------------+              +---------------+
 ---
 
 ## ⚙️ Setup Instructions
