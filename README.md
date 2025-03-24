@@ -47,9 +47,9 @@ chmod +x iperf_test_v1.7_syslog_temp_debug.py
 ```
 
 Script Parameters:
---server : IP address of iperf3 server (IPv4 only, e.g., 192.168.1.100)
---duration : Test duration in seconds (choose: 60, 300, or 600)
---debug : (Optional) Show full raw output in terminal for troubleshooting
+- --server : IP address of iperf3 server (IPv4 only, e.g., 192.168.1.100)
+- --duration : Test duration in seconds (choose: 60, 300, or 600)
+- --debug : (Optional) Show full raw output in terminal for troubleshooting
 
 📂 Output & Logging Structure
 ```
@@ -78,19 +78,20 @@ Add entry like:
 ```
 0 4 * * * find /tmp -name "ping_*.log" -o -name "iperf3_*.log" -mtime +7 -delete
 ```
-🛠 Troubleshooting Tips
-Make sure iperf3 server is running and reachable.
-Ensure firewall allows UDP/TCP port 5201.
-Check directory permissions for /var/log/iperf_tests/.
+🛠 Troubleshooting Tips:
+
+- Make sure iperf3 server is running and reachable.
+- Ensure firewall allows UDP/TCP port 5201.
+- Check directory permissions for /var/log/iperf_tests/.
 
 💡 Ideas for Future Enhancements
--- Export to CSV
--- Email or webhook notifications
--- Grafana dashboard (via InfluxDB/Prometheus)
--- REST API integration
+- Export to CSV
+- Email or webhook notifications
+- Grafana dashboard (via InfluxDB/Prometheus)
+- REST API integration
 
 📄 License
-MIT License — You’re free to modify, distribute, and use it.
+- MIT License — You’re free to modify, distribute, and use it.
 
 📁 .gitignore
 ```
