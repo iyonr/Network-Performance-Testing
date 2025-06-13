@@ -68,12 +68,12 @@ python3 performance_test.py --server <server_ipv4_address> --duration 60 --direc
 
 ```
 /tmp/
-├── ping_<timestamp>.log         # Raw ping output
-├── iperf3_udp_<timestamp>.log   # Raw UDP test output
-├── iperf3_tcp_<timestamp>.log   # Raw TCP test output
+🕼🏼 ping_<timestamp>.log         # Raw ping output
+🕼🏼 iperf3_udp_<timestamp>.log   # Raw UDP test output
+🕼🏼 iperf3_tcp_<timestamp>.log   # Raw TCP test output
 
 ~/iperf_logs/ (or /var/log/iperf_tests if run as root)
-└── iperf_summary.log            # Parsed one-line summary logs
+🕼🏼 iperf_summary.log            # Parsed one-line summary logs
 ```
 
 ### Example Summary Log:
@@ -118,29 +118,20 @@ python3 performance_test.py --server <server_ip> --os-mode MacOS
 ### 7. Non-root Logging
 When run as a non-root user, logs are automatically redirected to `~/iperf_logs/`
 
-### 8. Cron Job Execution
-```cron
-0 0,6,12,18 * * * /usr/bin/python3 /path/to/performance_test.py --server 10.1.1.1 --duration 300 >> ~/iperf_logs/cron.log 2>&1
-```
-
-### 9. Over VPN/IPsec Tunnel
-Ideal for scenarios like:
-```
-MacBook → LAN → FortiGate → IPsec → GCP Instance
-```
-
-### 10. Syslog-Style Summaries
-All test results are stored in single-line summaries to ease integration with monitoring tools.
-
-### 11. Full Upload Test with Custom Duration, Bandwidth, and Debug
+### 8. Full Upload Test with Custom Duration, Bandwidth, and Debug
 ```bash
 python3 performance_test.py --server <server_ip> --duration 300 --udp-bandwidth 500M --direction upload --port 5201 --debug
 ```
 
-### 12. Full Download Test with Custom Duration, Bandwidth, and Debug
+### 9. Full Download Test with Custom Duration, Bandwidth, and Debug
 ```bash
 python3 performance_test.py --server <server_ip> --duration 300 --udp-bandwidth 500M --direction download --port 5201 --debug
 ```
+
+---
+
+## ✉️ Syslog-Style Summaries
+All test results are stored in single-line summaries to ease integration with monitoring tools.
 
 ---
 
