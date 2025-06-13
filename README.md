@@ -15,7 +15,7 @@ It uses **client-server architecture**:
 - The **server** runs `iperf3 -s` and listens for incoming tests.
 - The **client** initiates the test using `iperf3 -c <server-ip>`.
 
-📛 Learn more: [https://iperf.fr](https://iperf.fr)
+💼 Learn more: [https://iperf.fr](https://iperf.fr)
 
 ---
 
@@ -132,6 +132,16 @@ MacBook → LAN → FortiGate → IPsec → GCP Instance
 ### 10. Syslog-Style Summaries
 All test results are stored in single-line summaries to ease integration with monitoring tools.
 
+### 11. Full Upload Test with Custom Duration, Bandwidth, and Debug
+```bash
+python3 performance_test.py --server <server_ip> --duration 300 --udp-bandwidth 500M --direction upload --port 5201 --debug
+```
+
+### 12. Full Download Test with Custom Duration, Bandwidth, and Debug
+```bash
+python3 performance_test.py --server <server_ip> --duration 300 --udp-bandwidth 500M --direction download --port 5201 --debug
+```
+
 ---
 
 ## 📊 Upload vs Download Explained
@@ -171,7 +181,7 @@ crontab -e
 ```
 Add:
 ```cron
-0 0,6,12,18 * * * /usr/bin/python3 /path/to/performance_test.py--server 192.168.1.100 --duration 60 >> ~/iperf_logs/cron.log 2>&1
+0 0,6,12,18 * * * /usr/bin/python3 /path/to/performance_test.py --server 192.168.1.100 --duration 60 >> ~/iperf_logs/cron.log 2>&1
 ```
 
 Clean up old logs:
@@ -198,7 +208,7 @@ MIT License — Free to use, modify, and redistribute.
 ```gitignore
 *.log
 *.pyc
-__pycache__/
+__pycache__
 /tmp/ping_*.log
 /tmp/iperf3_udp_*.log
 /tmp/iperf3_tcp_*.log
