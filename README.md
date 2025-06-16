@@ -50,7 +50,7 @@ chmod +x performance_test.py
 ## 🚀 How to Run the Script (IPv4)
 
 ```bash
-python3 performance_test.py --server <server_ipv4_address> --duration 60 --direction upload --debug
+python3 performance_test.py --server <server_ipv4_address> --duration 60 --port 5201 --udp-bandwidth 1000M --direction upload --os-mode Linux --debug
 ```
 
 ### Script Parameters:
