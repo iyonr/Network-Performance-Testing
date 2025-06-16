@@ -2,9 +2,19 @@
 # =====================================================
 # Author       : Marion Renaldo Rotensulu
 # Version      : v2.2
-# Description  : Custom Performance test with OS detection, user-level logging, UDP BW default, RTT parsing
+# Description  : Network Performance Test Script using iperf3 + ping (Syslog-style output)
+#                Supports upload/download mode, UDP/TCP metrics, debug, cron jobs,
+#                OS-aware ping parsing (Linux/MacOS), non-root logging, live ping, 
+#                post-test ping, and temp file cleanup.
+#
 # Log File     : /var/log/iperf_tests/iperf_summary.log (or ~/iperf_logs if not root)
+#
+# Log Output   : /var/log/iperf_tests/iperf_summary.log (for root)
+#              : ~/iperf_logs/iperf_summary.log (for non-root users)
+#
+# Temp Logs    : /tmp/ping_*.log, /tmp/iperf3_udp_*.log, /tmp/iperf3_tcp_*.log
 # Last Updated : 2025-06-13
+
 # Changelog    :
 #   - v1.0 Basic summary output
 #   - v1.1 Status check & debug output
@@ -17,6 +27,8 @@
 #   - v2.0 Logging fallback to user dir if not root, macOS RTT parsing added
 #   - v2.1 OS auto-detection + required fallback, reverse parsing for download mode
 #   - v2.2 Default UDP bandwidth set to 1000M if not defined
+#   - v2.3 Added --clean-tmp option to remove all temp log files after test,
+#          live ping during iperf, post-test ping parsing, and combined debug log
 # =====================================================
 
 import subprocess
@@ -26,174 +38,162 @@ import argparse
 import re
 import socket
 import platform
+import shutil
 import sys
+import threading
 
-# --- Argument Parser ---
-parser = argparse.ArgumentParser(description="Network Performance Test with iperf3 and ping.")
-parser.add_argument("--duration", type=int, choices=[60, 300, 600], default=60,
-                    help="Test duration in seconds")
+# Argument Parser
+parser = argparse.ArgumentParser(description="Network Performance Test Script (Syslog Style + Live Output + Cleanup)")
+parser.add_argument("--duration", type=int, choices=[60, 300, 600], default=60, help="Test duration in seconds")
 parser.add_argument("--server", type=str, required=True, help="IP address of iperf3 server")
-parser.add_argument("--port", type=int, default=5201, help="iperf3 server port (default: 5201)")
+parser.add_argument("--port", type=int, default=5201, help="iperf3 server port")
+parser.add_argument("--udp-bandwidth", type=str, default="1000M", help="UDP test bandwidth")
+parser.add_argument("--direction", choices=["upload", "download"], default="upload", help="Test direction")
 parser.add_argument("--debug", action="store_true", help="Enable debug output")
-parser.add_argument("--udp-bandwidth", type=str, default="1000M", help="UDP test bandwidth (default: 1000M)")
-parser.add_argument("--direction", type=str, choices=["upload", "download"], default="upload",
-                    help="Test direction (default: upload)")
-parser.add_argument("--os-mode", type=str, choices=["Linux", "MacOS"], required=False,
-                    help="Override OS detection")
+parser.add_argument("--os-mode", choices=["Linux", "MacOS"], help="Override OS auto-detection")
+parser.add_argument("--clean-tmp", action="store_true", help="Clean up temp files after test")
 args = parser.parse_args()
 
-# --- Auto-detect OS ---
-auto_os = platform.system()
-if auto_os == "Darwin":
-    detected_os = "MacOS"
-elif auto_os == "Linux":
-    detected_os = "Linux"
-else:
-    detected_os = None
+# OS Detection
+detected_os = platform.system()
+os_mode = args.os_mode or ("MacOS" if detected_os.lower() == "darwin" else "Linux")
+os_mode = os_mode.capitalize()
 
-if args.os_mode:
-    os_mode = args.os_mode
-elif detected_os:
-    os_mode = detected_os
-    print(f"[INFO] OS auto-detected as {os_mode}")
-else:
-    print("[ERROR] Could not detect OS. Please provide --os-mode MacOS|Linux.")
-    sys.exit(1)
-
-# --- Define Paths ---
-duration = args.duration
-server_ip = args.server
-port = args.port
-debug_mode = args.debug
-direction = args.direction
-udp_bw = args.udp_bandwidth or "1000M"  # fallback if empty string
-
+# Timestamp
 timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-user_home = os.path.expanduser("~")
-is_root = (os.geteuid() == 0)
 
-log_dir = "/var/log/iperf_tests" if is_root else os.path.join(user_home, "iperf_logs")
-tmp_dir = "/tmp"
+# Logging Paths
+is_root = os.geteuid() == 0
+log_dir = "/var/log/iperf_tests" if is_root else os.path.expanduser("~/iperf_logs")
 os.makedirs(log_dir, exist_ok=True)
-
 summary_log_file = os.path.join(log_dir, "iperf_summary.log")
+
+# Temp Paths
+tmp_dir = "/tmp"
 ping_tmp = os.path.join(tmp_dir, f"ping_{timestamp}.log")
+ping_live_tmp = os.path.join(tmp_dir, f"ping_live_{timestamp}.log")
+ping_post_tmp = os.path.join(tmp_dir, f"ping_post_{timestamp}.log")
 udp_tmp = os.path.join(tmp_dir, f"iperf3_udp_{timestamp}.log")
 tcp_tmp = os.path.join(tmp_dir, f"iperf3_tcp_{timestamp}.log")
 
-# --- Helper Functions ---
-def run_and_save(cmd, tmpfile):
-    try:
-        with open(tmpfile, "w") as f:
-            subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True, timeout=duration + 30)
-        with open(tmpfile, "r") as f:
-            return f.read()
-    except Exception as e:
-        return f"ERROR: {e}"
+# Helper Function
 
-def check_mtu(ip):
-    mtu_test = subprocess.run(["ping", "-c", "1", "-s", "1472", "-M", "do", ip], capture_output=True, text=True)
-    if "frag needed" in mtu_test.stderr or "Message too long" in mtu_test.stderr:
-        print("[WARNING] MTU issue detected. Consider adjusting MTU if UDP loss is high.")
+def run_and_save(cmd, tmpfile, live=False):
+    with open(tmpfile, "w") as f:
+        process = subprocess.Popen(cmd, stdout=f, stderr=subprocess.STDOUT, text=True)
+        if live:
+            return process
+        try:
+            process.wait(timeout=args.duration + 30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return f"ERROR: Command '{cmd}' timed out"
+    with open(tmpfile, "r") as f:
+        return f.read()
 
-# --- Reachability Check ---
-ping_status = False
-try:
-    socket.gethostbyname(server_ip)
-    ping_check = subprocess.run(["ping", "-c", "3", server_ip], capture_output=True, text=True)
-    if "0% packet loss" in ping_check.stdout or "1% packet loss" in ping_check.stdout:
-        ping_status = True
-except Exception:
-    ping_status = False
+# Regex ping parser
 
-# --- Initialize Results ---
-status = "FAIL"
-latency_avg = "-"
-packet_loss = "-"
-udp_bw_result = udp_jitter = udp_ploss = "-"
-tcp_bw_result = "-"
+def parse_ping(filepath):
+    avg_latency = "-"
+    loss = "-"
+    with open(filepath, "r") as f:
+        text = f.read()
+        loss_match = re.search(r"(\d+)% packet loss", text)
+        if loss_match:
+            loss = loss_match.group(1) + "%"
+        if os_mode == "Linux":
+            match = re.search(r"rtt min/avg/max/mdev = [\d\.]+/([\d\.]+)/[\d\.]+/[\d\.]+", text)
+        else:
+            match = re.search(r"(?:rtt|round-trip).* = [\d\.]+/([\d\.]+)/[\d\.]+/[\d\.]+", text)
+        if match:
+            avg_latency = match.group(1) + "ms"
+    return avg_latency, loss
 
-if ping_status:
-    status = "OK"
-    check_mtu(server_ip)
+# Initial Ping Check
+reachable = subprocess.run(["ping", "-c", "3", args.server], capture_output=True, text=True)
+status = "OK" if "0% packet loss" in reachable.stdout else "FAIL"
 
-    print("[INFO] Running latency test (ping)...")
-    ping_output = run_and_save(["ping", "-c", str(duration // 2), server_ip], ping_tmp)
+if status == "FAIL":
+    print(f"[ERROR] Server {args.server} unreachable. Test aborted.")
+    sys.exit(1)
 
-    if os_mode == "Linux":
-        match = re.search(r"rtt min/avg/max/mdev = [\d\.]+/([\d\.]+)/[\d\.]+/[\d\.]+", ping_output)
-    elif os_mode == "MacOS":
-        match = re.search(r"(?:rtt|round-trip).* = [\d\.]+/([\d\.]+)/[\d\.]+/[\d\.]+", ping_output)
-    else:
-        match = None
+print("[INFO] Starting baseline ping...")
+run_and_save(["ping", "-c", str(args.duration // 2), args.server], ping_tmp)
+base_lat, base_loss = parse_ping(ping_tmp)
 
-    if match:
-        latency_avg = match.group(1) + "ms"
+# Live Ping
+print("[INFO] Starting live ping during iperf test...")
+live_ping = run_and_save(["ping", args.server], ping_live_tmp, live=True)
 
-    ploss_match = re.search(r"(\d+)% packet loss", ping_output)
-    if ploss_match:
-        packet_loss = ploss_match.group(1) + "%"
+# UDP Test
+print("[INFO] Running UDP test...")
+udp_cmd = ["iperf3", "-c", args.server, "-p", str(args.port), "-u", "-t", str(args.duration), "-b", args.udp_bandwidth]
+if args.direction == "download":
+    udp_cmd.append("--reverse")
+udp_output = run_and_save(udp_cmd, udp_tmp)
 
-    print("[INFO] Running UDP test (jitter, loss, bandwidth)...")
-    udp_args = ["iperf3", "-c", server_ip, "-p", str(port), "-u", "-t", str(duration), "-b", udp_bw]
-    if direction == "download":
-        udp_args.append("-R")
+# TCP Test
+print("[INFO] Running TCP test...")
+tcp_cmd = ["iperf3", "-c", args.server, "-p", str(args.port), "-t", str(args.duration)]
+if args.direction == "download":
+    tcp_cmd.append("--reverse")
+tcp_output = run_and_save(tcp_cmd, tcp_tmp)
 
-    udp_output = run_and_save(udp_args, udp_tmp)
+# Kill live ping
+live_ping.terminate()
+print("[INFO] Running post-test ping...")
+run_and_save(["ping", "-c", str(args.duration // 2), args.server], ping_post_tmp)
 
-    udp_line = ""
-    for line in udp_output.splitlines():
-        if direction == "download" and "sender" in line and "bits/sec" in line:
-            udp_line = line.strip()
-        elif direction == "upload" and "receiver" in line and "bits/sec" in line:
-            udp_line = line.strip()
+live_lat, live_loss = parse_ping(ping_live_tmp)
+post_lat, post_loss = parse_ping(ping_post_tmp)
 
-    if udp_line:
-        udp_bw_match = re.search(r"(\d+(?:\.\d+)? \wbits/sec)", udp_line)
+# Parse UDP
+udp_bw = udp_jitter = udp_loss = "-"
+for line in udp_output.splitlines():
+    if "receiver" in line and "bits/sec" in line:
+        udp_bw_match = re.search(r"(\d+(?:\.\d+)? \wbits/sec)", line)
         if udp_bw_match:
-            udp_bw_result = udp_bw_match.group(1)
+            udp_bw = udp_bw_match.group(1)
+        jitter_match = re.search(r"(\d+\.\d+) ms", line)
+        if jitter_match:
+            udp_jitter = jitter_match.group(1) + "ms"
+        loss_match = re.search(r"\((\d+(?:\.\d+)?)%\)", line)
+        if loss_match:
+            udp_loss = loss_match.group(1) + "%"
+        break
 
-        udp_jitter_match = re.search(r"(\d+\.\d+)\s+ms\s+\d+/", udp_line)
-        if udp_jitter_match:
-            udp_jitter = udp_jitter_match.group(1) + "ms"
+# Parse TCP
+tcp_bw = "-"
+for line in tcp_output.splitlines():
+    if "receiver" in line and "bits/sec" in line:
+        match = re.search(r"(\d+(?:\.\d+)? \wbits/sec)", line)
+        if match:
+            tcp_bw = match.group(1)
+        break
 
-        udp_loss_match = re.search(r"\(([\d\.]+)%\)", udp_line)
-        if udp_loss_match:
-            udp_ploss = udp_loss_match.group(1) + "%"
+# Summary
+summary_line = (f"{timestamp} STATUS={status} SERVER={args.server}:{args.port} DURATION={args.duration}s "
+                f"LATENCY={base_lat} PING_LOSS={base_loss} "
+                f"LIVE_LAT={live_lat} LIVE_LOSS={live_loss} "
+                f"POST_LAT={post_lat} POST_LOSS={post_loss} "
+                f"UDP_BW={udp_bw} UDP_JITTER={udp_jitter} UDP_LOSS={udp_loss} "
+                f"TCP_BW={tcp_bw}")
+print("\n[RESULT]", summary_line)
 
-    print("[INFO] Running TCP test (bandwidth)...")
-    tcp_args = ["iperf3", "-c", server_ip, "-p", str(port), "-t", str(duration)]
-    if direction == "download":
-        tcp_args.append("-R")
-
-    tcp_output = run_and_save(tcp_args, tcp_tmp)
-
-    tcp_line = ""
-    for line in tcp_output.splitlines():
-        if "receiver" in line and "bits/sec" in line:
-            tcp_line = line.strip()
-
-    if tcp_line:
-        tcp_bw_match = re.search(r"(\d+(?:\.\d+)? \wbits/sec)", tcp_line)
-        if tcp_bw_match:
-            tcp_bw_result = tcp_bw_match.group(1)
-
-    if debug_mode:
-        print("\n[DEBUG] Ping Output:\n", ping_output)
-        print("\n[DEBUG] UDP Output:\n", udp_output)
-        print("\n[DEBUG] UDP Parsed Line:\n", udp_line)
-        print("\n[DEBUG] TCP Output:\n", tcp_output)
-        print("\n[DEBUG] TCP Parsed Line:\n", tcp_line)
-
-else:
-    print(f"[ERROR] Server {server_ip} unreachable. Test aborted.")
-
-# --- Final Summary ---
-summary_line = (f"{timestamp} STATUS={status} SERVER={server_ip}:{port} DURATION={duration}s "
-                f"LATENCY={latency_avg} PING_LOSS={packet_loss} "
-                f"UDP_BW={udp_bw_result} UDP_JITTER={udp_jitter} UDP_LOSS={udp_ploss} "
-                f"TCP_BW={tcp_bw_result}")
-
-print("\n[RESULT] " + summary_line)
 with open(summary_log_file, "a") as f:
     f.write(summary_line + "\n")
+
+if args.debug:
+    print("\n[DEBUG] --- Ping Output (Base) ---\n", open(ping_tmp).read())
+    print("\n[DEBUG] --- Ping Output (Live) ---\n", open(ping_live_tmp).read())
+    print("\n[DEBUG] --- Ping Output (Post) ---\n", open(ping_post_tmp).read())
+    print("\n[DEBUG] --- UDP Output ---\n", udp_output)
+    print("\n[DEBUG] --- TCP Output ---\n", tcp_output)
+
+# Clean temp logs if requested
+if args.clean_tmp:
+    for file in [ping_tmp, ping_live_tmp, ping_post_tmp, udp_tmp, tcp_tmp]:
+        try:
+            os.remove(file)
+        except Exception:
+            pass
